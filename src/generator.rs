@@ -10,6 +10,7 @@ use std::fs;
 use std::fs::DirEntry;
 use std::io::{Error, ErrorKind::AlreadyExists};
 use std::path::{Path, PathBuf};
+use serial_test::serial;
 
 use crate::images::merge;
 use crate::utils::{get_asset_quantity, progress_bar};
@@ -19,7 +20,7 @@ const OUTPUT_PATH: &str = "./output/";
 const IMAGES_PATH: &str = "./output/images/";
 const METADATA_PATH: &str = "./output/metadata/";
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct Attribute {
     trait_type: String,
     value: String,
@@ -39,7 +40,7 @@ pub struct Collection {
     pub base_uri: String,
 }
 
-/// Generates random NFT images and metadata
+/// Generates given amount of random NFT images and metadata
 pub fn generate_all(amount: usize, layers: Vec<&str>, collection: Collection) -> Result<(), Error> {
     let mut identifiers: HashMap<String, bool> = HashMap::new();
 
@@ -50,7 +51,6 @@ pub fn generate_all(amount: usize, layers: Vec<&str>, collection: Collection) ->
     println!("Starting...");
     for token_id in 1..=amount {
         let mut attributes: Vec<Attribute> = get_random_attributes(&layers);
-
         let mut identifier = generate_identifier(&attributes);
 
         // we need unique NFTs
@@ -60,41 +60,45 @@ pub fn generate_all(amount: usize, layers: Vec<&str>, collection: Collection) ->
         }
 
         identifiers.insert(identifier, true);
-
-        let base_image = attribute_to_dynamic_image(&attributes[0]);
-        let mut images: Vec<DynamicImage> = Vec::new();
-
-        for i in 1..layers.len() {
-            let image = attribute_to_dynamic_image(&attributes[i]);
-            images.push(image);
-        }
-
-        let new_image_path =
-            IMAGES_PATH.to_owned() + token_id.to_string().as_str() + ".png";
-        let new_metadata_path =
-            METADATA_PATH.to_owned() + token_id.to_string().as_str();
-
-        // create image
-        merge(base_image, &images).save(new_image_path).unwrap();
-
-        // create metadata
-        let metadata: Metadata = Metadata {
-            name: collection.name.clone() + " #" + token_id.to_string().as_str(),
-            description: collection.description.clone(),
-            image: collection.base_uri.clone() + token_id.to_string().as_str(),
-            attributes,
-        };
-
-        let json = serde_json::to_string(&metadata).unwrap();
-
-        fs::write(new_metadata_path, json).expect("unable to write file");
-
+        generate_one(&collection, &layers, &attributes, token_id);
         bar.inc(1);
     }
 
     Ok(())
 }
 
+/// Generates one NFT and metadata for the given information
+fn generate_one(collection: &Collection, layers: &Vec<&str>, attributes: &Vec<Attribute>, token_id: usize) {
+    let base_image = attribute_to_dynamic_image(&attributes[0]);
+    let mut images: Vec<DynamicImage> = Vec::new();
+
+    for i in 1..layers.len() {
+        let image = attribute_to_dynamic_image(&attributes[i]);
+        images.push(image);
+    }
+
+    let new_image_path =
+        IMAGES_PATH.to_owned() + token_id.to_string().as_str() + ".png";
+    let new_metadata_path =
+        METADATA_PATH.to_owned() + token_id.to_string().as_str();
+
+    // create image
+    merge(base_image, &images).save(new_image_path).unwrap();
+
+    // create metadata
+    let metadata: Metadata = Metadata {
+        name: collection.name.clone() + " #" + token_id.to_string().as_str(),
+        description: collection.description.clone(),
+        image: collection.base_uri.clone() + token_id.to_string().as_str(),
+        attributes: attributes.into_iter().cloned().collect(),
+    };
+
+    let json = serde_json::to_string(&metadata).unwrap();
+
+    fs::write(new_metadata_path, json).expect("unable to write file");
+}
+
+/// Produces an DynamicImage for attributes (assets)
 fn attribute_to_dynamic_image(attr: &Attribute) -> DynamicImage {
     let path_str = REQUIRED_PATHS[0].to_owned() + attr.trait_type.as_str() + "/" + attr.value.as_str() + ".png";
     let path = Path::new(&path_str);
@@ -112,7 +116,7 @@ fn generate_identifier(attributes: &Vec<Attribute>) -> String {
     format!("{:X}", identifier.finalize())
 }
 
-/// Returns all required attributes for an NFT
+/// Returns an NFT with full attributes
 fn get_random_attributes(layers: &Vec<&str>) -> Vec<Attribute> {
     let mut attributes: Vec<Attribute> = Vec::new();
 
@@ -127,6 +131,7 @@ fn get_random_attributes(layers: &Vec<&str>) -> Vec<Attribute> {
     attributes
 }
 
+/// Finds an asset path randomly
 fn get_random_asset_path(trait_type: &str) -> Result<DirEntry, String> {
     let asset_quantity = get_asset_quantity(trait_type).unwrap();
 
@@ -137,10 +142,12 @@ fn get_random_asset_path(trait_type: &str) -> Result<DirEntry, String> {
     Ok(Path::new(asset_path).read_dir().unwrap().nth(random_num).unwrap().unwrap())
 }
 
+/// Produces a DynamicImage from given path
 fn path_to_dynamic_image(path: &PathBuf) -> DynamicImage {
     image::open(path).unwrap()
 }
 
+/// Finds asset's name for given path
 fn path_to_asset_name(path: &DirEntry) -> String {
     let asset_name = path
         .path()
@@ -154,14 +161,14 @@ fn path_to_asset_name(path: &DirEntry) -> String {
 }
 
 /// Returns random asset from the corresponding directory
-fn get_random_asset(asset_name: &str) -> (DynamicImage, String) {
-    let random_image_path = get_random_asset_path(asset_name).unwrap();
-
-    (
-        path_to_dynamic_image(&random_image_path.path()),
-        path_to_asset_name(&random_image_path),
-    )
-}
+// fn get_random_asset(asset_name: &str) -> (DynamicImage, String) {
+//     let random_image_path = get_random_asset_path(asset_name).unwrap();
+//
+//     (
+//         path_to_dynamic_image(&random_image_path.path()),
+//         path_to_asset_name(&random_image_path),
+//     )
+// }
 
 /// If the output directory exists, clears it
 pub fn set_output_dir() -> Result<(), Error> {
@@ -173,6 +180,8 @@ pub fn set_output_dir() -> Result<(), Error> {
     Ok(())
 }
 
+/// If the given directory does not exists, creates one.
+/// But, if it is exists, then it'll clear it.
 fn set_given_dir(dir: &str) -> Result<(), Error> {
     match fs::create_dir(dir) {
         Err(err) => {
