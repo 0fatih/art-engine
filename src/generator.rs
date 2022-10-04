@@ -1,18 +1,23 @@
+use std::borrow::ToOwned;
 use rand::Rng;
+use std::collections::HashMap;
 
-use std::fs;
-use std::io::{Error, ErrorKind::AlreadyExists};
-use std::path::Path;
 use image::DynamicImage;
-use indicatif::{ProgressBar, ProgressStyle};
+use serde::{Deserialize, Serialize};
 use serde_json;
-use serde::{Serialize, Deserialize};
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::fs::DirEntry;
+use std::io::{Error, ErrorKind::AlreadyExists};
+use std::path::{Path, PathBuf};
 
-use crate::utils::get_asset_quantity;
 use crate::images::merge;
+use crate::utils::{get_asset_quantity, progress_bar};
 use crate::utils::REQUIRED_PATHS;
 
 const OUTPUT_PATH: &str = "./output/";
+const IMAGES_PATH: &str = "./output/images/";
+const METADATA_PATH: &str = "./output/metadata/";
 
 #[derive(Serialize, Deserialize)]
 struct Attribute {
@@ -25,7 +30,7 @@ struct Metadata {
     name: String,
     description: String,
     image: String,
-    attributes: Vec<Attribute>
+    attributes: Vec<Attribute>,
 }
 
 pub struct Collection {
@@ -36,29 +41,38 @@ pub struct Collection {
 
 /// Generates random NFT images and metadata
 pub fn generate_all(amount: usize, layers: Vec<&str>, collection: Collection) -> Result<(), Error> {
-    set_output_dir()?;
+    let mut identifiers: HashMap<String, bool> = HashMap::new();
 
-    let bar = ProgressBar::new(amount.try_into().unwrap());
-    bar.set_style(ProgressStyle::with_template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
-        .unwrap()
-        .progress_chars("##-"));
+    // we'll use this for uniqueness
+
+    let bar = progress_bar(amount);
 
     println!("Starting...");
     for token_id in 1..=amount {
-        let (base_image, base_property) = get_random_property(layers[0]);
-        let mut images: Vec<DynamicImage> = Vec::new();
-        let mut attributes: Vec<Attribute> = Vec::new();
+        let mut attributes: Vec<Attribute> = get_random_attributes(&layers);
 
-        attributes.push(Attribute { trait_type: layers[0].to_string(), value: base_property });
+        let mut identifier = generate_identifier(&attributes);
 
-        for i in 1..layers.len() {
-            let (image, property) = get_random_property(layers[i]);
-            images.push(image);
-            attributes.push(Attribute { trait_type: layers[i].to_string(), value: property});
+        // we need unique NFTs
+        while identifiers.get(&generate_identifier(&attributes)) != None {
+            attributes = get_random_attributes(&layers);
+            identifier = generate_identifier(&attributes);
         }
 
-        let new_image_path = OUTPUT_PATH.to_owned()  + "images/" + token_id.to_string().as_str() + ".png";
-        let new_metadata_path = OUTPUT_PATH.to_owned() + "metadata/" + token_id.to_string().as_str();
+        identifiers.insert(identifier, true);
+
+        let base_image = attribute_to_dynamic_image(&attributes[0]);
+        let mut images: Vec<DynamicImage> = Vec::new();
+
+        for i in 1..layers.len() {
+            let image = attribute_to_dynamic_image(&attributes[i]);
+            images.push(image);
+        }
+
+        let new_image_path =
+            IMAGES_PATH.to_owned() + token_id.to_string().as_str() + ".png";
+        let new_metadata_path =
+            METADATA_PATH.to_owned() + token_id.to_string().as_str();
 
         // create image
         merge(base_image, &images).save(new_image_path).unwrap();
@@ -68,7 +82,7 @@ pub fn generate_all(amount: usize, layers: Vec<&str>, collection: Collection) ->
             name: collection.name.clone() + " #" + token_id.to_string().as_str(),
             description: collection.description.clone(),
             image: collection.base_uri.clone() + token_id.to_string().as_str(),
-            attributes
+            attributes,
         };
 
         let json = serde_json::to_string(&metadata).unwrap();
@@ -81,37 +95,86 @@ pub fn generate_all(amount: usize, layers: Vec<&str>, collection: Collection) ->
     Ok(())
 }
 
-/// Returns random asset from the corresponding directory
-fn get_random_property(asset_name: &str) -> (DynamicImage, String) {
-    let asset_quantity = get_asset_quantity(asset_name).unwrap();
+fn attribute_to_dynamic_image(attr: &Attribute) -> DynamicImage {
+    let path_str = REQUIRED_PATHS[0].to_owned() + attr.trait_type.as_str() + "/" + attr.value.as_str() + ".png";
+    let path = Path::new(&path_str);
+    path_to_dynamic_image(&path.to_path_buf())
+}
+
+/// Returns an identifier for the given attributes
+fn generate_identifier(attributes: &Vec<Attribute>) -> String {
+    let mut identifier = Sha256::new();
+
+    for i in 0..attributes.len() {
+        identifier.update(attributes[i].value.clone());
+    }
+
+    format!("{:X}", identifier.finalize())
+}
+
+/// Returns all required attributes for an NFT
+fn get_random_attributes(layers: &Vec<&str>) -> Vec<Attribute> {
+    let mut attributes: Vec<Attribute> = Vec::new();
+
+    for i in 0..layers.len() {
+        let random_asset_path = get_random_asset_path(layers[i]).unwrap();
+        attributes.push(Attribute {
+            trait_type: layers[i].to_string(),
+            value: path_to_asset_name(&random_asset_path),
+        });
+    }
+
+    attributes
+}
+
+fn get_random_asset_path(trait_type: &str) -> Result<DirEntry, String> {
+    let asset_quantity = get_asset_quantity(trait_type).unwrap();
 
     let random_num = rand::thread_rng().gen_range(0..asset_quantity);
 
-    let asset_path: &str = &(REQUIRED_PATHS[0].to_owned() + asset_name);
+     let asset_path = &(REQUIRED_PATHS[0].to_owned() + trait_type);
 
-    let random_image_path = Path::new(asset_path)
-        .read_dir().unwrap().nth(random_num).unwrap().unwrap();
+    Ok(Path::new(asset_path).read_dir().unwrap().nth(random_num).unwrap().unwrap())
+}
 
-    let property_name = random_image_path.path().file_stem().unwrap().to_str().unwrap().to_string();
+fn path_to_dynamic_image(path: &PathBuf) -> DynamicImage {
+    image::open(path).unwrap()
+}
 
-    (image::open(random_image_path.path()).unwrap(), property_name)
+fn path_to_asset_name(path: &DirEntry) -> String {
+    let asset_name = path
+        .path()
+        .file_stem()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    asset_name
+}
+
+/// Returns random asset from the corresponding directory
+fn get_random_asset(asset_name: &str) -> (DynamicImage, String) {
+    let random_image_path = get_random_asset_path(asset_name).unwrap();
+
+    (
+        path_to_dynamic_image(&random_image_path.path()),
+        path_to_asset_name(&random_image_path),
+    )
 }
 
 /// If the output directory exists, clears it
-fn set_output_dir() -> Result<(), Error> {
+pub fn set_output_dir() -> Result<(), Error> {
     set_given_dir(OUTPUT_PATH)?;
 
-    let images_path: &str = &(OUTPUT_PATH.to_owned() + "images");
-    let metadata_path: &str = &(OUTPUT_PATH.to_owned() + "metadata");
-
-    set_given_dir(images_path)?;
-    set_given_dir(metadata_path)?;
+    set_given_dir(IMAGES_PATH)?;
+    set_given_dir(METADATA_PATH)?;
 
     Ok(())
 }
 
 fn set_given_dir(dir: &str) -> Result<(), Error> {
-    match fs::create_dir(dir)  {
+    match fs::create_dir(dir) {
         Err(err) => {
             if err.kind() == AlreadyExists {
                 fs::remove_dir_all(dir)?;
@@ -119,7 +182,7 @@ fn set_given_dir(dir: &str) -> Result<(), Error> {
             } else {
                 return Err(err);
             }
-        },
+        }
         Ok(_) => {}
     }
 
@@ -151,7 +214,7 @@ fn test_set_given_dir_exist() {
             if err.kind() != AlreadyExists {
                 panic!("An error occurred while trying to create path");
             }
-        },
+        }
         Ok(_) => {
             set_given_dir(path).unwrap();
         }
@@ -172,7 +235,7 @@ fn test_set_output_exist_with_sub_directories() {
             if err.kind() != AlreadyExists {
                 panic!("An error occurred while trying to create path");
             }
-        },
+        }
         Ok(_) => {
             set_given_dir(root_path).unwrap();
         }
