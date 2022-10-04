@@ -1,0 +1,14 @@
+[package]
+name = "rust-nft-generator"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+image = "0.24.4"
+rand = "0.8.5"
+serial_test = "0.9.0"
+indicatif = "0.17.1"
+serde_json = "1.0.85"
+serde = { version = "1.0", features = ["derive"] }
