@@ -8,7 +8,7 @@ use serde_json;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::fs::DirEntry;
-use std::io::{Error, ErrorKind::AlreadyExists};
+use std::io::{Error, ErrorKind, ErrorKind::AlreadyExists};
 use std::path::{Path, PathBuf};
 use serial_test::serial;
 
@@ -42,6 +42,10 @@ pub struct Collection {
 
 /// Generates given amount of random NFT images and metadata
 pub fn generate_all(amount: usize, layers: Vec<&str>, collection: Collection) -> Result<(), Error> {
+    if amount > possible_nfts() {
+        return Err(Error::new(ErrorKind::InvalidInput, "insufficient amount of assets"));
+    }
+
     let mut identifiers: HashMap<String, bool> = HashMap::new();
 
     // we'll use this for uniqueness
@@ -65,6 +69,33 @@ pub fn generate_all(amount: usize, layers: Vec<&str>, collection: Collection) ->
     }
 
     Ok(())
+}
+
+/// Returns all possible combination amount of NFTs
+fn possible_nfts() -> usize {
+    let assets_path = Path::new(REQUIRED_PATHS[0]).read_dir().unwrap();
+
+    let mut amount: usize = 1;
+
+    for asset_dir in assets_path {
+        let asset_dir = asset_dir.unwrap().path();
+        amount *= file_amount(&asset_dir);
+    }
+
+    amount
+}
+
+/// Returns file count in a directory
+fn file_amount(path: &PathBuf) -> usize {
+    let files = path.read_dir().unwrap();
+
+    let mut amount = 0;
+
+    for _ in files {
+        amount += 1;
+    }
+
+    amount
 }
 
 /// Generates one NFT and metadata for the given information
@@ -132,14 +163,14 @@ fn get_random_attributes(layers: &Vec<&str>) -> Vec<Attribute> {
 }
 
 /// Finds an asset path randomly
-fn get_random_asset_path(trait_type: &str) -> Result<DirEntry, String> {
+fn get_random_asset_path(trait_type: &str) -> Result<PathBuf, String> {
     let asset_quantity = get_asset_quantity(trait_type).unwrap();
 
     let random_num = rand::thread_rng().gen_range(0..asset_quantity);
 
      let asset_path = &(REQUIRED_PATHS[0].to_owned() + trait_type);
 
-    Ok(Path::new(asset_path).read_dir().unwrap().nth(random_num).unwrap().unwrap())
+    Ok(Path::new(asset_path).read_dir().unwrap().nth(random_num).unwrap().unwrap().path())
 }
 
 /// Produces a DynamicImage from given path
@@ -148,9 +179,8 @@ fn path_to_dynamic_image(path: &PathBuf) -> DynamicImage {
 }
 
 /// Finds asset's name for given path
-fn path_to_asset_name(path: &DirEntry) -> String {
+fn path_to_asset_name(path: &PathBuf) -> String {
     let asset_name = path
-        .path()
         .file_stem()
         .unwrap()
         .to_str()

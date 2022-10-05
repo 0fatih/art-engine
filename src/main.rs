@@ -13,5 +13,5 @@ fn main() {
 
     let layers: Vec<&str> = vec!["Background", "Bottom lid", "Eye color", "Eyeball", "Goo", "Iris", "Shine", "Top lid"];
 
-    generate_all(5, layers, Collection { name: "Deneme".to_string(), description: "Deneme".to_string(), base_uri: "https://deneme.com/".to_string()}).unwrap();
+    generate_all(100, layers, Collection { name: "Deneme".to_string(), description: "Deneme".to_string(), base_uri: "https://deneme.com/".to_string()}).unwrap();
 }
