@@ -102,10 +102,10 @@ fn generate_one_image(layers: &Vec<&str>, attributes: &Vec<Attribute>, token_id:
 
 /// Updates all metadata with the given collection information
 pub fn generate_all_metadata(collection: Collection) -> Result<(), Error> {
-    let old_metadata = fs::read_dir(METADATA_PATH.to_owned())?;
+    let metadata_count = fs::read_dir(METADATA_PATH.to_owned())?.count();
 
-    let bar = progress_bar(amount);
-    for token_id in 1..=old_metadata.count() {
+    let bar = progress_bar(metadata_count);
+    for token_id in 1..=metadata_count {
         let metadata_path =
             METADATA_PATH.to_owned() + token_id.to_string().as_str();
 
