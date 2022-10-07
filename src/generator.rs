@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::fs::DirEntry;
 use std::io::{Error, ErrorKind, ErrorKind::AlreadyExists};
 use std::path::{Path, PathBuf};
 use serial_test::serial;
@@ -16,7 +15,6 @@ use crate::images::merge;
 use crate::utils::{get_asset_quantity, progress_bar};
 use crate::utils::REQUIRED_PATHS;
 
-const OUTPUT_PATH: &str = "./output/";
 const IMAGES_PATH: &str = "./output/images/";
 const METADATA_PATH: &str = "./output/metadata/";
 
@@ -41,14 +39,13 @@ pub struct Collection {
 }
 
 /// Generates given amount of random NFT images and metadata
-pub fn generate_all(amount: usize, layers: Vec<&str>, collection: Collection) -> Result<(), Error> {
+pub fn generate_all_images(amount: usize, layers: Vec<&str>) -> Result<(), Error> {
     if amount > possible_nfts() {
         return Err(Error::new(ErrorKind::InvalidInput, "insufficient amount of assets"));
     }
 
-    let mut identifiers: HashMap<String, bool> = HashMap::new();
-
     // we'll use this for uniqueness
+    let mut identifiers: HashMap<String, bool> = HashMap::new();
 
     let bar = progress_bar(amount);
 
@@ -64,7 +61,72 @@ pub fn generate_all(amount: usize, layers: Vec<&str>, collection: Collection) ->
         }
 
         identifiers.insert(identifier, true);
-        generate_one(&collection, &layers, &attributes, token_id);
+        generate_one_image(&layers, &attributes, token_id);
+        bar.inc(1);
+    }
+
+    Ok(())
+}
+
+/// Generates one NFT and metadata for the given information
+fn generate_one_image(layers: &Vec<&str>, attributes: &Vec<Attribute>, token_id: usize) {
+    let base_image = attribute_to_dynamic_image(&attributes[0]);
+    let mut images: Vec<DynamicImage> = Vec::new();
+
+    for i in 1..layers.len() {
+        let image = attribute_to_dynamic_image(&attributes[i]);
+        images.push(image);
+    }
+
+    let new_image_path =
+        IMAGES_PATH.to_owned() + token_id.to_string().as_str() + ".png";
+    let metadata_path =
+        METADATA_PATH.to_owned() + token_id.to_string().as_str();
+
+    // create metadata
+    let place_holder_data ="Do not forget to change this".to_string();
+    let metadata: Metadata = Metadata {
+        name: place_holder_data.clone(),
+        description: place_holder_data.clone(),
+        image: place_holder_data.clone(),
+        attributes: attributes.into_iter().cloned().collect(),
+    };
+
+    let json = serde_json::to_string(&metadata).unwrap();
+
+    fs::write(metadata_path, json).expect("unable to write file");
+
+    // create image
+    merge(base_image, &images).save(new_image_path).unwrap();
+}
+
+/// Updates all metadata with the given collection information
+pub fn generate_all_metadata(collection: Collection) -> Result<(), Error> {
+    let old_metadata = fs::read_dir(METADATA_PATH.to_owned())?;
+
+    let bar = progress_bar(amount);
+    for token_id in 1..=old_metadata.count() {
+        let metadata_path =
+            METADATA_PATH.to_owned() + token_id.to_string().as_str();
+
+        let old_metadata: Metadata = {
+            let old_metadata = std::fs::read_to_string(&metadata_path)?;
+
+            serde_json::from_str::<Metadata>(&old_metadata).unwrap()
+        };
+
+        // create metadata
+        let metadata: Metadata = Metadata {
+            name: collection.name.clone() + " #" + token_id.to_string().as_str(),
+            description: collection.description.clone(),
+            image: collection.base_uri.clone() + token_id.to_string().as_str(),
+            ..old_metadata
+            // attributes: attributes.into_iter().cloned().collect(),
+        };
+
+        let json = serde_json::to_string(&metadata).unwrap();
+
+        fs::write(metadata_path, json).expect("unable to write file");
         bar.inc(1);
     }
 
@@ -96,37 +158,6 @@ fn file_amount(path: &PathBuf) -> usize {
     }
 
     amount
-}
-
-/// Generates one NFT and metadata for the given information
-fn generate_one(collection: &Collection, layers: &Vec<&str>, attributes: &Vec<Attribute>, token_id: usize) {
-    let base_image = attribute_to_dynamic_image(&attributes[0]);
-    let mut images: Vec<DynamicImage> = Vec::new();
-
-    for i in 1..layers.len() {
-        let image = attribute_to_dynamic_image(&attributes[i]);
-        images.push(image);
-    }
-
-    let new_image_path =
-        IMAGES_PATH.to_owned() + token_id.to_string().as_str() + ".png";
-    let new_metadata_path =
-        METADATA_PATH.to_owned() + token_id.to_string().as_str();
-
-    // create image
-    merge(base_image, &images).save(new_image_path).unwrap();
-
-    // create metadata
-    let metadata: Metadata = Metadata {
-        name: collection.name.clone() + " #" + token_id.to_string().as_str(),
-        description: collection.description.clone(),
-        image: collection.base_uri.clone() + token_id.to_string().as_str(),
-        attributes: attributes.into_iter().cloned().collect(),
-    };
-
-    let json = serde_json::to_string(&metadata).unwrap();
-
-    fs::write(new_metadata_path, json).expect("unable to write file");
 }
 
 /// Produces an DynamicImage for attributes (assets)
@@ -200,11 +231,11 @@ fn path_to_asset_name(path: &PathBuf) -> String {
 //     )
 // }
 
-/// If the output directory exists, clears it
-pub fn set_output_dir() -> Result<(), Error> {
-    set_given_dir(OUTPUT_PATH)?;
-
+/// If the images directory exists, clears it
+pub fn set_images_dir() -> Result<(), Error> {
     set_given_dir(IMAGES_PATH)?;
+
+    // when we are creating new images, we need to clear also metadata path
     set_given_dir(METADATA_PATH)?;
 
     Ok(())

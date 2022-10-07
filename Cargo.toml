@@ -1,5 +1,5 @@
 [package]
-name = "rust-nft-generator"
+name = "art-engine"
 version = "0.1.0"
 edition = "2021"
 
@@ -13,3 +13,4 @@ indicatif = "0.17.1"
 serde_json = "1.0.85"
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10.6"
+clap = { version = "4.0.10", features = [ "derive" ] }

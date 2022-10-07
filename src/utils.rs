@@ -3,7 +3,7 @@ use std::fs::metadata;
 use std::io::{Error, ErrorKind};
 use indicatif::{ProgressBar, ProgressStyle};
 
-pub const REQUIRED_PATHS: [&str; 1] = ["./assets/"];
+pub const REQUIRED_PATHS: [&str; 2] = ["./assets/", "./output/"];
 
 /// Returns files and directories in current directory
 #[allow(dead_code)]
